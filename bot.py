@@ -8,6 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
@@ -241,23 +242,97 @@ class StepениnBot:
     def submit_answer(self, answer):
         """Отправить ответ"""
         try:
-            wait = WebDriverWait(self.driver, 5)
+            wait = WebDriverWait(self.driver, 10)
             
-            # Поле ответа
-            answer_field = wait.until(EC.presence_of_element_located((By.NAME, "answer")))
+            # Пробуем разные селекторы для поля ответа
+            answer_field = None
+            
+            # Селектор 1: по имени
+            try:
+                answer_field = wait.until(EC.presence_of_element_located((By.NAME, "answer")))
+                print_info("Найдено поле ответа по NAME")
+            except:
+                pass
+            
+            # Селектор 2: по типу input
+            if not answer_field:
+                try:
+                    answer_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='text']")))
+                    print_info("Найдено поле ответа по CSS input[type='text']")
+                except:
+                    pass
+            
+            # Селектор 3: по placeholder
+            if not answer_field:
+                try:
+                    answer_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='ответ']")))
+                    print_info("Найдено поле ответа по placeholder")
+                except:
+                    pass
+            
+            if not answer_field:
+                # Выводим HTML для отладки
+                page_source = self.driver.page_source[:2000]
+                print_info(f"Поле ответа не найдено. HTML страницы (первые 500 символов):")
+                print(page_source[:500])
+                print_error("Не удалось найти поле для ввода ответа")
+                return False
+            
+            # Очищаем и заполняем поле
+            self.driver.execute_script("arguments[0].value = '';", answer_field)
             self.driver.execute_script(f"arguments[0].value = '{answer}';", answer_field)
             
-            # Кнопка "Ответить"
-            submit_btn = wait.until(EC.element_to_be_clickable(
-                (By.XPATH, "//button[contains(text(), 'Ответить')]")
-            ))
-            submit_btn.click()
-            print_info(f"Ответ {answer} отправлен")
+            # Эмулируем события input/change
+            self.driver.execute_script("""
+                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+            """, answer_field)
             
-            time.sleep(1)
-            return True
+            print_info(f"Поле заполнено: {answer}")
+            
+            # Пробуем найти кнопку "Ответить" разными способами
+            submit_btn = None
+            
+            try:
+                submit_btn = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(text(), 'Ответить')]")
+                ))
+                print_info("Найдена кнопка 'Ответить' по тексту")
+            except:
+                try:
+                    submit_btn = wait.until(EC.element_to_be_clickable(
+                        (By.CSS_SELECTOR, "button[type='submit']")
+                    ))
+                    print_info("Найдена кнопка 'Ответить' по CSS")
+                except:
+                    try:
+                        submit_btn = wait.until(EC.element_to_be_clickable(
+                            (By.XPATH, "//button[@type='submit']")
+                        ))
+                        print_info("Найдена кнопка submit")
+                    except:
+                        pass
+            
+            if submit_btn:
+                self.driver.execute_script("arguments[0].click();", submit_btn)
+                print_info(f"Ответ {answer} отправлен")
+                time.sleep(2)
+                return True
+            else:
+                print_info("Кнопка не найдена, пробуем отправить Enter")
+                answer_field.send_keys(Keys.RETURN)
+                time.sleep(2)
+                return True
+                
         except Exception as e:
             print_error(f"Ошибка отправки: {e}")
+            # Делаем скриншот для отладки
+            try:
+                screenshot_path = "/tmp/error_screenshot.png"
+                self.driver.save_screenshot(screenshot_path)
+                print_info(f"Скриншот сохранён: {screenshot_path}")
+            except:
+                pass
             return False
     
     def run(self, start_url=None, max_questions=None):
